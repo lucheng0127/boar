@@ -86,7 +86,7 @@ func setupInterfaces(vni uint32, mtu int, cidr string) error {
 	// Add ip route for vrf
 	ipv4Addr, ipv4Net, err := net.ParseCIDR(cidr)
 	if err != nil {
-		log.Errorf("Parse CIDR\n", err.Error())
+		log.Errorf("Parse CIDR\n%s", err.Error())
 		return err
 	}
 	vrfAddr := net.IPNet{
