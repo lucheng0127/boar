@@ -5,7 +5,7 @@ go 1.18
 replace github.com/lucheng0127/boar => ./
 
 require (
-	github.com/golang/mock v1.4.4
+	github.com/agiledragon/gomonkey/v2 v2.2.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.12.0
@@ -13,7 +13,6 @@ require (
 )
 
 require (
-	github.com/agiledragon/gomonkey/v2 v2.2.0 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
