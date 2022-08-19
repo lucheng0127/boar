@@ -11,6 +11,7 @@ import (
 
 const (
 	VRF_ROUTE_TABLE = 10
+	VXLAN_UDP_PORT  = 4789
 )
 
 func getVtepByVNI(vni uint32) (netlink.Link, error) {
@@ -58,7 +59,7 @@ func setupInterfaces(vni uint32, mtu int, cidr string) error {
 	vtep := netlink.Vxlan{
 		LinkAttrs: vtepAttr,
 		VxlanId:   int(vni),
-		Port:      4789,
+		Port:      VXLAN_UDP_PORT,
 		Proxy:     true,
 	}
 	if err := netlink.LinkAdd(&vtep); err != nil {
