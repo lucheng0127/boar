@@ -9,7 +9,6 @@ import (
 	"github.com/lucheng0127/boar/api"
 	"github.com/lucheng0127/boar/dataplane"
 	"github.com/lucheng0127/boar/internal"
-	"github.com/lucheng0127/boar/serve"
 
 	log "github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
@@ -42,9 +41,9 @@ func main() {
 	}
 
 	apiServer := api.NewApiServer()
-	go serve.Launch(apiServer)
-	dataplane := dataplane.NewDataplane()
-	go serve.Launch(dataplane)
+	dataplaneServer := dataplane.NewDataplane()
+	go apiServer.Serve()
+	go dataplaneServer.Serve()
 
 	sig := <-sigCh
 	log.Infof("Got %s signal, exit program ...", sig)
