@@ -1,7 +1,9 @@
 api:
   port: 50052
 bgp:
-  host: 127.0.0.1:50051
+  router_id: 192.168.222.1
+  listen_port: 50051
+  rr_id: 192.168.222.222
   as_num: 65000
   vni: 1001
   cidr: 172.16.1.1/24
