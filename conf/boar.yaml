@@ -1,10 +1,2 @@
 api:
-  port: 50052
-bgp:
-  router_id: 192.168.222.1
-  listen_port: 50051
-  rr_id: 192.168.222.222
-  as_num: 65000
-  vni: 1001
-  cidr: 172.16.1.1/24
-  mtu: 1500
+  port: 50051

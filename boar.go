@@ -1,51 +1,90 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 
-	"github.com/lucheng0127/boar/api"
-	"github.com/lucheng0127/boar/dataplane"
-	"github.com/lucheng0127/boar/internal"
+	"github.com/lucheng0127/boar/internal/pkg/config"
+	"github.com/lucheng0127/boar/pkg/server"
 
-	log "github.com/sirupsen/logrus"
-	flag "github.com/spf13/pflag"
-	"github.com/spf13/viper"
+	flags "github.com/jessevdk/go-flags"
+	"github.com/sirupsen/logrus"
 )
 
+var logger = logrus.New()
+
+const VERSION string = "0.1"
+
 func main() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	var cfgFile *string = flag.String("cfg", "/etc/boar/boar.yaml", "Config file")
-	var debug *bool = flag.Bool("debug", false, "Enable debug")
-	flag.Parse()
-
-	internal.SetLogLevel(*debug)
-	defer func() {
-		if r := recover(); r != nil {
-			log.Panicln(r)
-			os.Exit(1)
-		}
-	}()
-
-	viper.SetConfigType("yaml")
-	viper.SetConfigFile(*cfgFile)
-	log.Debugf("Read config from %s", *cfgFile)
-	err := viper.ReadInConfig()
+	var opts struct {
+		ConfigFile    string `short:"f" long:"config-file" description:"config file"`
+		ConfigType    string `short:"t" long:"config-type" description:"config file type (toml, yaml, json)" default:"yaml"`
+		LogLevel      string `short:"l" long:"log-level" description:"log level"`
+		DisableStdlog bool   `long:"disable-stdlog" description:"disable standard logging"`
+		CPUs          int    `long:"cpus" description:"number of CPUs to be used"`
+		Dry           bool   `short:"d" long:"dry-run" description:"check configuration"`
+		Version       bool   `long:"version" description:"show version number"`
+	}
+	_, err := flags.Parse(&opts)
 	if err != nil {
-		panic(err)
+		os.Exit(1)
 	}
 
-	apiServer := api.NewApiServer()
-	dataplaneServer := dataplane.NewDataplane()
-	go apiServer.Serve()
-	go dataplaneServer.Serve()
+	if opts.Version {
+		fmt.Println("Boar version ", VERSION)
+	}
+
+	if opts.CPUs == 0 {
+		runtime.GOMAXPROCS(runtime.NumCPU())
+	} else {
+		if runtime.NumCPU() < opts.CPUs {
+			logger.Errorf("Only %d CPUs are available, wanted %d", runtime.NumCPU(), opts.CPUs)
+			os.Exit(1)
+		}
+		runtime.GOMAXPROCS(opts.CPUs)
+	}
+
+	switch opts.LogLevel {
+	case "debug":
+		logger.SetLevel(logrus.DebugLevel)
+	default:
+		logger.SetLevel(logrus.InfoLevel)
+	}
+
+	if opts.DisableStdlog {
+		logger.SetOutput(io.Discard)
+	} else {
+		logger.SetOutput(os.Stdout)
+	}
+
+	config, err := config.ReadConfigFile(opts.ConfigFile, opts.ConfigType)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"Topic": "Config",
+			"Error": err,
+		}).Fatalf("Can't read config file %s", opts.ConfigFile)
+	}
+	logger.WithFields(logrus.Fields{
+		"Topic": "Config",
+	}).Info("Finished reading config file")
+	if opts.LogLevel == "debug" {
+		fmt.Printf("%+v\n", config)
+	}
+	if opts.Dry {
+		os.Exit(0)
+	}
+
+	logger.Info("Boar started")
+	s := server.NewServer(config.Api.Port, logger)
+	go s.Serve()
 
 	sig := <-sigCh
-	log.Infof("Got %s signal, exit program ...", sig)
-	os.Exit(-1)
+	logger.Infof("Got %s signal, exit program ...", sig)
 }

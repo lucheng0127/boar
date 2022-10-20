@@ -2,14 +2,11 @@ package main
 
 import (
 	"os"
-	"reflect"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/agiledragon/gomonkey/v2"
-	"github.com/lucheng0127/boar/api"
-	"github.com/lucheng0127/boar/dataplane"
+	"github.com/golang/mock/gomock"
 )
 
 func Test_main(t *testing.T) {
@@ -17,22 +14,16 @@ func Test_main(t *testing.T) {
 		name string
 	}{
 		{
-			name: "normal",
+			name: "Normal",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Args = append(os.Args, "--cfg=./conf/boar.yaml")
-			os.Args = append(os.Args, "--debug")
+			os.Args = append(os.Args, "-f=conf/boar.yaml")
+			os.Args = append(os.Args, "-t=yaml")
 
-			patchDataplane := gomonkey.ApplyMethod(reflect.TypeOf(dataplane.NewDataplane()),
-				"Serve", func(_ *dataplane.Dataplane) {})
-			defer patchDataplane.Reset()
-			patchApi := gomonkey.ApplyMethod(reflect.TypeOf(api.NewApiServer()),
-				"Serve", func(_ *api.APIServer) {})
-			defer patchApi.Reset()
-			patchExist := gomonkey.ApplyFunc(os.Exit, func(_ int) {})
-			defer patchExist.Reset()
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
 			go func() {
 				time.Sleep(time.Microsecond)
