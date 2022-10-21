@@ -82,7 +82,7 @@ func main() {
 	}
 
 	logger.Info("Boar started")
-	s := server.NewServer(config.Api.Port, logger)
+	s := server.NewServer(config.Api.Port, config.Agent.Host, logger)
 	go s.Serve()
 
 	sig := <-sigCh

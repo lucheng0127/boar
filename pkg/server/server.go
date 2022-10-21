@@ -16,10 +16,10 @@ type BoarServer struct {
 	agent *agent.AgentServer
 }
 
-func NewServer(port int, logger *logrus.Logger) *BoarServer {
+func NewServer(port int, host string, logger *logrus.Logger) *BoarServer {
 	return &BoarServer{
 		api:   api.NewServer(port, logger),
-		agent: agent.NewServer(logger),
+		agent: agent.NewServer(host, logger),
 	}
 }
 

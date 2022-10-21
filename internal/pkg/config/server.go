@@ -6,8 +6,13 @@ type ApiConfigSet struct {
 	Port int `mapstructure:"port"`
 }
 
+type AgentConfigSet struct {
+	Host string `mapstructure:"host"`
+}
+
 type BoarConfigSet struct {
-	Api ApiConfigSet `mapstructure:"api"`
+	Api   ApiConfigSet   `mapstructure:"api"`
+	Agent AgentConfigSet `mapstructure:"agent"`
 }
 
 func ReadConfigFile(path, format string) (*BoarConfigSet, error) {
