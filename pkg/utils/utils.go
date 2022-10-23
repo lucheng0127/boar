@@ -2,13 +2,10 @@ package utils
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/osrg/gobgp/v3/pkg/apiutil"
 	"github.com/osrg/gobgp/v3/pkg/packet/bgp"
 )
 
@@ -61,17 +58,4 @@ func GetNextHopFromPathAttributes(attrs []bgp.PathAttributeInterface) net.IP {
 		}
 	}
 	return nil
-}
-
-func PathDetail(path *apiutil.Path) string {
-	t := time.Unix(path.Age, 0)
-	tStr := t.UTC().Format(time.RFC3339)
-	return fmt.Sprintf(
-		"age %s neigh [%s] source [%s] withdraw [%t] nlri [%s]",
-		tStr,
-		path.NeighborIP.String(),
-		path.SourceID.String(),
-		path.Withdrawal,
-		path.Nlri.String(),
-	)
 }

@@ -3,28 +3,50 @@ package agent
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"runtime/debug"
 	"time"
 
 	api "github.com/osrg/gobgp/v3/api"
-	"github.com/osrg/gobgp/v3/pkg/apiutil"
 	"github.com/sirupsen/logrus"
-
-	"github.com/lucheng0127/boar/pkg/utils"
 )
+
+type PathInfo struct {
+	RT          string
+	RD          string
+	IP          net.IP
+	Mac         net.HardwareAddr
+	Age         int64
+	Withdrawal  bool
+	Neighbor    net.IP
+	IsLocal     bool
+	Nexthop     net.IP
+	AsPath      string
+	Communities []uint32
+}
 
 type AgentServer struct {
 	host   string
 	logger *logrus.Logger
-	pathCh chan *apiutil.Path
+	pathCh chan *PathInfo
+}
+
+func (p *PathInfo) Detail() string {
+	t := time.Unix(p.Age, 0)
+	tStr := t.UTC().Format(time.RFC3339)
+	return fmt.Sprintf(
+		"age [%s] rt [%s] rd [%s] ip [%s] mac [%s] withdrawl [%t] neighbor [%s] local [%t] nexthop [%s] as path [%s] communities %+v",
+		tStr, p.RT, p.RD, p.Mac.String(), p.IP.String(),
+		p.Withdrawal, p.Neighbor.String(), p.IsLocal, p.Nexthop.String(), p.AsPath, p.Communities,
+	)
 }
 
 func NewServer(host string, logger *logrus.Logger) *AgentServer {
 	return &AgentServer{
 		host:   host,
 		logger: logger,
-		pathCh: make(chan *apiutil.Path, 64),
+		pathCh: make(chan *PathInfo, 16),
 	}
 }
 
@@ -62,7 +84,7 @@ func (s *AgentServer) monitorRibs() {
 	if err != nil {
 		panic(fmt.Sprintf("Client get watch event failed: %s", err.Error()))
 	}
-	Monitor(recver, s.pathCh)
+	Monitor(recver, s)
 }
 
 func (s *AgentServer) handleEVPNMsg() {
@@ -70,18 +92,12 @@ func (s *AgentServer) handleEVPNMsg() {
 		path := <-s.pathCh
 		s.logger.WithFields(logrus.Fields{
 			"Topic": "BGP MSG",
-		}).Debugf("Receive EVPN MSG, pathinfo [%s]", utils.PathDetail(path))
+		}).Debugf("Receive EVPN MSG, pathinfo %s", path.Detail())
 
-		nexthop := utils.GetNextHopFromPathAttributes(path.Attrs)
-		if shouldSkip, err := utils.IsLocalIP(nexthop.String()); err != nil {
-			s.logger.WithFields(logrus.Fields{
-				"Topic": "Config",
-			}).Errorf("Failed to get local IP address")
-			panic(err)
-		} else if shouldSkip {
+		if path.IsLocal {
 			s.logger.WithFields(logrus.Fields{
 				"Topic": "BGP MSG",
-			}).Debugf("Skip handle local bgp msg [%s]", utils.PathDetail(path))
+			}).Debugf("Skip handle local bgp msg %s", path.Detail())
 			continue
 		}
 

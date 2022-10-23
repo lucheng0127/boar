@@ -7,8 +7,11 @@ import (
 	"net"
 	"time"
 
+	"github.com/lucheng0127/boar/pkg/utils"
 	api "github.com/osrg/gobgp/v3/api"
 	"github.com/osrg/gobgp/v3/pkg/apiutil"
+	"github.com/osrg/gobgp/v3/pkg/packet/bgp"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -26,7 +29,7 @@ func NewClient(ctx context.Context, host string) (api.GobgpApiClient, context.Ca
 
 func Monitor(recver interface {
 	Recv() (*api.WatchEventResponse, error)
-}, pathCh chan *apiutil.Path) {
+}, s *AgentServer) {
 	for {
 		r, err := recver.Recv()
 		if err == io.EOF {
@@ -42,16 +45,47 @@ func Monitor(recver interface {
 				}
 				nlri, _ := apiutil.GetNativeNlri(p)
 				attrs, _ := apiutil.GetNativePathAttributes(p)
-				pathCh <- &apiutil.Path{
-					Nlri:       nlri,
-					Age:        p.Age.AsTime().Unix(),
-					Best:       p.Best,
-					Attrs:      attrs,
-					Stale:      p.Stale,
-					Withdrawal: p.IsWithdraw,
-					SourceID:   net.ParseIP(p.SourceId),
-					NeighborIP: net.ParseIP(p.NeighborIp),
+				pathInfo := new(PathInfo)
+
+				evpnNlri := nlri.(*bgp.EVPNNLRI).RouteTypeData
+				switch route := evpnNlri.(type) {
+				case *bgp.EVPNMacIPAdvertisementRoute:
+					pathInfo.RD = route.RD.String()
+					pathInfo.IP = route.IPAddress
+					pathInfo.Mac = route.MacAddress
 				}
+				pathInfo.Age = p.Age.AsTime().Unix()
+				pathInfo.Withdrawal = p.IsWithdraw
+				pathInfo.Neighbor = net.ParseIP(p.NeighborIp)
+				for _, attr := range attrs {
+					switch a := attr.(type) {
+					case *bgp.PathAttributeNextHop:
+						pathInfo.Nexthop = a.Value
+					case *bgp.PathAttributeMpReachNLRI:
+						pathInfo.Nexthop = a.Nexthop
+					case *bgp.PathAttributeAsPath:
+						pathInfo.AsPath = a.String()
+					case *bgp.PathAttributeCommunities:
+						pathInfo.Communities = append(pathInfo.Communities, a.Value...)
+					case *bgp.PathAttributeExtendedCommunities:
+						extComms := a.Value
+						for _, extComm := range extComms {
+							extCommType, extCommSubType := extComm.GetTypes()
+							if extCommType == bgp.EC_TYPE_TRANSITIVE_TWO_OCTET_AS_SPECIFIC && extCommSubType == bgp.EC_SUBTYPE_ROUTE_TARGET {
+								pathInfo.RT = extComm.String()
+							}
+						}
+					}
+				}
+				if isLocal, err := utils.IsLocalIP(pathInfo.Nexthop.String()); err != nil {
+					s.logger.WithFields(logrus.Fields{
+						"Topic": "Config",
+					}).Errorf("Failed to get local IP address")
+					panic(err)
+				} else {
+					pathInfo.IsLocal = isLocal
+				}
+				s.pathCh <- pathInfo
 			}
 		}
 	}
