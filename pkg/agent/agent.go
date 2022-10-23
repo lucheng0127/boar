@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/lucheng0127/boar/pkg/utils"
 	api "github.com/osrg/gobgp/v3/api"
 	"github.com/sirupsen/logrus"
 )
@@ -24,12 +25,14 @@ type PathInfo struct {
 	Nexthop     net.IP
 	AsPath      string
 	Communities []uint32
+	IsBUM       bool
 }
 
 type AgentServer struct {
 	host   string
 	logger *logrus.Logger
 	pathCh chan *PathInfo
+	vniMap map[int][]int
 }
 
 func (p *PathInfo) Detail() string {
@@ -47,6 +50,7 @@ func NewServer(host string, logger *logrus.Logger) *AgentServer {
 		host:   host,
 		logger: logger,
 		pathCh: make(chan *PathInfo, 16),
+		vniMap: make(map[int][]int),
 	}
 }
 
@@ -87,21 +91,57 @@ func (s *AgentServer) monitorRibs() {
 	Monitor(recver, s)
 }
 
-func (s *AgentServer) handleEVPNMsg() {
-	for {
-		path := <-s.pathCh
+func (s *AgentServer) handleBUM(p *PathInfo) {
+	// Get L3VNI from rt mark it, then we should handle BGP MSG that with same rt
+	// Use vpc vni as rt, there can be more then one vxnet under a vpc
+	s.logger.WithFields(logrus.Fields{
+		"Topic": "BUM",
+	}).Debug(p.Detail())
+	_, rt, err := utils.ParseVni(p.RT)
+	if err != nil {
 		s.logger.WithFields(logrus.Fields{
 			"Topic": "BGP MSG",
-		}).Debugf("Receive EVPN MSG, pathinfo %s", path.Detail())
+		}).Errorf("Parse vni failed %s", err.Error())
+		return
+	}
+	// TODO(shawnlu): Check local vtep interface exist, or log it
+	s.vniMap[rt] = append(s.vniMap[rt], rt)
+}
 
-		if path.IsLocal {
+func (s *AgentServer) handleMacadv(p *PathInfo) {
+	s.logger.WithFields(logrus.Fields{
+		"Topic": "MACADV",
+	}).Debug(p.Detail())
+}
+
+func (s *AgentServer) handleEVPNMsg() {
+	defer func() {
+		if r := recover(); r != nil {
 			s.logger.WithFields(logrus.Fields{
-				"Topic": "BGP MSG",
-			}).Debugf("Skip handle local bgp msg %s", path.Detail())
+				"Topic": "Handle BGP MSG",
+			}).Error("Failed to handle MSG ", r)
+		}
+	}()
+
+	for {
+		p := <-s.pathCh
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "BGP MSG",
+		}).Debug(p.Detail())
+
+		if p.IsLocal {
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "Local BGP",
+			}).Debug(p.Detail())
 			continue
 		}
 
 		// Handle MSG
+		if p.IsBUM {
+			s.handleBUM(p)
+		} else {
+			s.handleMacadv(p)
+		}
 	}
 }
 

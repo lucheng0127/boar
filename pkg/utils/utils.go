@@ -2,11 +2,19 @@ package utils
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/osrg/gobgp/v3/pkg/packet/bgp"
+)
+
+const (
+	MSG_TYPE_NONE int = iota
+	MSG_TYPE_VM
+	MSG_TYPE_DVR
 )
 
 var gLocalIP string
@@ -58,4 +66,20 @@ func GetNextHopFromPathAttributes(attrs []bgp.PathAttributeInterface) net.IP {
 		}
 	}
 	return nil
+}
+
+func ParseVni(vni string) (int, int, error) {
+	vniFragments := strings.Split(vni, ":")
+	if len(vniFragments) != 2 {
+		return 0, 0, fmt.Errorf("wrong vni format [%s]", vni)
+	}
+	vniType, err := strconv.Atoi(vniFragments[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	vniValue, err := strconv.Atoi(vniFragments[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return vniType, vniValue, nil
 }

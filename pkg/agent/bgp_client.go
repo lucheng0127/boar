@@ -53,6 +53,10 @@ func Monitor(recver interface {
 					pathInfo.RD = route.RD.String()
 					pathInfo.IP = route.IPAddress
 					pathInfo.Mac = route.MacAddress
+				case *bgp.EVPNMulticastEthernetTagRoute:
+					pathInfo.IsBUM = true
+					pathInfo.RD = route.RD.String()
+					pathInfo.IP = route.IPAddress
 				}
 				pathInfo.Age = p.Age.AsTime().Unix()
 				pathInfo.Withdrawal = p.IsWithdraw
