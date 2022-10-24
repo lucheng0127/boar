@@ -100,18 +100,71 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 	_, rt, err := utils.ParseVni(p.RT)
 	if err != nil {
 		s.logger.WithFields(logrus.Fields{
-			"Topic": "BGP MSG",
+			"Topic": "BUM",
 		}).Errorf("Parse vni failed %s", err.Error())
 		return
 	}
-	// TODO(shawnlu): Check local vtep interface exist, or log it
+
+	vtep, err := utils.GetVtepByVNI(rt)
+	if err != nil {
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "BUM",
+		}).Errorf("Get vtep by vni [%d] failed", rt)
+		return
+	}
+	if len(vtep) == 0 {
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "BUM",
+		}).Errorf("No vxlan found with vni [%d], invalid bgp msg %s", rt, p.Detail())
+		return
+	}
 	s.vniMap[rt] = append(s.vniMap[rt], rt)
+}
+
+func (s *AgentServer) handleDVR() {
+	fmt.Println("Not Implement")
+}
+
+func (s *AgentServer) handleVM() {
+	fmt.Println("Not Implement")
 }
 
 func (s *AgentServer) handleMacadv(p *PathInfo) {
 	s.logger.WithFields(logrus.Fields{
 		"Topic": "MACADV",
 	}).Debug(p.Detail())
+	_, rt, err := utils.ParseVni(p.RT)
+	if err != nil {
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "MACADV",
+		}).Errorf("Parse vni failed %s", err.Error())
+		return
+	}
+	if _, ok := s.vniMap[rt]; !ok {
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "MACADV",
+			"RT":    rt,
+		}).Debugf("Skip handle bgp msg %s", p.Detail())
+	} else {
+		vniType, rd, err := utils.ParseVni(p.RD)
+		if err != nil {
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "MACADV",
+			}).Errorf("Parse vni failed %s", err.Error())
+			return
+		}
+		s.vniMap[rt] = append(s.vniMap[rt], rd)
+		switch vniType {
+		case utils.MSG_TYPE_DVR:
+			s.handleDVR()
+		case utils.MSG_TYPE_VM:
+			s.handleVM()
+		default:
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "MACADV",
+			}).Warnf("Unspported msg type %s", p.Detail())
+		}
+	}
 }
 
 func (s *AgentServer) handleEVPNMsg() {
