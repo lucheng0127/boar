@@ -53,6 +53,7 @@ func main() {
 
 	switch opts.LogLevel {
 	case "debug":
+		logger.SetReportCaller(true)
 		logger.SetLevel(logrus.DebugLevel)
 	default:
 		logger.SetLevel(logrus.InfoLevel)

@@ -116,6 +116,7 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 		}).Errorf("Parse rt failed %s", err.Error())
 		return
 	}
+	// Get L2VNI from rd, find interface with rd, if exist add it to vnimap
 	_, rd, err := utils.ParseVni(p.RD)
 	if err != nil {
 		s.logger.WithFields(logrus.Fields{
@@ -124,11 +125,11 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 		return
 	}
 
-	vtep, err := utils.GetVtepByVNI(rt)
+	vtep, err := utils.GetVtepByVNI(rd)
 	if err != nil {
 		s.logger.WithFields(logrus.Fields{
 			"Topic": "BUM",
-		}).Errorf("Get vtep by vni [%d] failed", rt)
+		}).Errorf("Get vtep by vni [%d] failed", rd)
 		return
 	}
 	if len(vtep) == 0 {
