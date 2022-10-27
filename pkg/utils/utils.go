@@ -83,3 +83,7 @@ func ParseVni(vni string) (int, int, error) {
 	}
 	return vniType, vniValue, nil
 }
+
+func GetDvrIfaceByVtep(vtep string) string {
+	return "kr_" + vtep[1:]
+}

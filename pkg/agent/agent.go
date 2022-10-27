@@ -28,6 +28,18 @@ type PathInfo struct {
 	IsBUM       bool
 }
 
+type vxlanInfo struct {
+	vni        int // Remote vxlan peer vni
+	ip         net.IP
+	mac        net.HardwareAddr
+	nexthop    net.IP
+	vtep       string // Local vxlan vtep
+	netnsId    int    // Local dvr netns id
+	age        int64
+	withdrawal bool
+	dvrIface   string
+}
+
 type AgentServer struct {
 	host   string
 	logger *logrus.Logger
@@ -101,7 +113,14 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 	if err != nil {
 		s.logger.WithFields(logrus.Fields{
 			"Topic": "BUM",
-		}).Errorf("Parse vni failed %s", err.Error())
+		}).Errorf("Parse rt failed %s", err.Error())
+		return
+	}
+	_, rd, err := utils.ParseVni(p.RD)
+	if err != nil {
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "BUM",
+		}).Errorf("Parse rd failed %s", err.Error())
 		return
 	}
 
@@ -118,15 +137,49 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 		}).Errorf("No vxlan found with vni [%d], invalid bgp msg %s", rt, p.Detail())
 		return
 	}
-	s.vniMap[rt] = append(s.vniMap[rt], rt)
+	s.vniMap[rt] = append(s.vniMap[rt], rd)
 }
 
-func (s *AgentServer) handleDVR() {
+func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) {
 	fmt.Println("Not Implement")
 }
 
-func (s *AgentServer) handleVM() {
+func (s *AgentServer) handleVM(vxlanInfos []*vxlanInfo) {
 	fmt.Println("Not Implement")
+}
+
+func (s *AgentServer) generateVxlanInfo(rt, rd int, p *PathInfo) []*vxlanInfo {
+	var vxlanInfos []*vxlanInfo
+	// Get all local vni list by rt, and get vtep by vni
+	for _, localVni := range s.vniMap[rt] {
+		vtep, err := utils.GetVtepByVNI(localVni)
+		if err != nil {
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "VxlanInfo",
+			}).Errorf("Get vtep by vni failed %s", err.Error())
+			continue
+		}
+		dvrIface := utils.GetDvrIfaceByVtep(vtep)
+		netnsId, err := utils.GetNetnsByIface(dvrIface)
+		if err != nil {
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "VxlanInfo",
+			}).Errorf("Get netns id of interface [%s] failed %s", dvrIface, err.Error())
+		}
+
+		info := new(vxlanInfo)
+		info.vni = rd
+		info.ip = p.IP
+		info.mac = p.Mac
+		info.nexthop = p.Nexthop
+		info.vtep = vtep
+		info.netnsId = netnsId
+		info.age = p.Age
+		info.withdrawal = p.Withdrawal
+		info.dvrIface = dvrIface
+		vxlanInfos = append(vxlanInfos, info)
+	}
+	return vxlanInfos
 }
 
 func (s *AgentServer) handleMacadv(p *PathInfo) {
@@ -153,12 +206,15 @@ func (s *AgentServer) handleMacadv(p *PathInfo) {
 			}).Errorf("Parse vni failed %s", err.Error())
 			return
 		}
-		s.vniMap[rt] = append(s.vniMap[rt], rd)
+
+		// Generate vxlanInfo, sync fdb,route and neigh to all vtep under the same vpc
+		vxlanInfos := s.generateVxlanInfo(rt, rd, p)
+
 		switch vniType {
 		case utils.MSG_TYPE_DVR:
-			s.handleDVR()
+			s.handleDVR(vxlanInfos)
 		case utils.MSG_TYPE_VM:
-			s.handleVM()
+			s.handleVM(vxlanInfos)
 		default:
 			s.logger.WithFields(logrus.Fields{
 				"Topic": "MACADV",
@@ -182,17 +238,22 @@ func (s *AgentServer) handleEVPNMsg() {
 			"Topic": "BGP MSG",
 		}).Debug(p.Detail())
 
-		if p.IsLocal {
-			s.logger.WithFields(logrus.Fields{
-				"Topic": "Local BGP",
-			}).Debug(p.Detail())
-			continue
-		}
-
 		// Handle MSG
 		if p.IsBUM {
+			if !p.IsLocal {
+				s.logger.WithFields(logrus.Fields{
+					"Topic": "Skip BUM",
+				}).Debugf("%s", p.Detail())
+				continue
+			}
 			s.handleBUM(p)
 		} else {
+			if p.IsLocal {
+				s.logger.WithFields(logrus.Fields{
+					"Topic": "Skip MACADV",
+				}).Debugf("%s", p.Detail())
+				continue
+			}
 			s.handleMacadv(p)
 		}
 	}
