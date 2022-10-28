@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,6 +16,7 @@ const (
 	MSG_TYPE_NONE int = iota
 	MSG_TYPE_VM
 	MSG_TYPE_DVR
+	CLS_FORMAT string = "2006-01-02 15:04:05"
 )
 
 var gLocalIP string
@@ -86,4 +88,18 @@ func ParseVni(vni string) (int, int, error) {
 
 func GetDvrIfaceByVtep(vtep string) string {
 	return "kr_" + vtep[1:]
+}
+
+func GetNetInfoFromComms(comms []uint32) (int, int, error) {
+	if len(comms) != 3 {
+		return 0, 0, errors.New("wrong communites")
+	}
+	netLen := int(comms[1]) - int(comms[0])
+	subnetLen := int(comms[2]) - int(comms[0])
+	return netLen, subnetLen, nil
+}
+
+func ParseNetworkInfo(ip net.IP, netLen, subnetLen int) (net.IPNet, net.IP, error) {
+	// TODO(shawnlu): Implement it
+	return net.IPNet{}, net.IPv4(8, 8, 8, 8), nil
 }

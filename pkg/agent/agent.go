@@ -38,6 +38,8 @@ type vxlanInfo struct {
 	age        int64
 	withdrawal bool
 	dvrIface   string
+	netLen     int
+	subnetLen  int
 }
 
 type AgentServer struct {
@@ -47,9 +49,18 @@ type AgentServer struct {
 	vniMap map[int][]int
 }
 
+func (info *vxlanInfo) Detail() string {
+	t := time.Unix(info.age, 0)
+	tStr := t.Format(utils.CLS_FORMAT)
+	return fmt.Sprintf(
+		"age [%s] vni [%d] ip [%s] mac [%s] nexthop [%s] vtep [%s] netnsId [%d] withdrawal [%t] net len [%d] subnet len [%d]",
+		tStr, info.vni, info.ip.String(), info.mac.String(), info.nexthop.String(), info.vtep, info.netnsId, info.withdrawal, info.netLen, info.subnetLen,
+	)
+}
+
 func (p *PathInfo) Detail() string {
 	t := time.Unix(p.Age, 0)
-	tStr := t.UTC().Format(time.RFC3339)
+	tStr := t.Format(utils.CLS_FORMAT)
 	return fmt.Sprintf(
 		"age [%s] rt [%s] rd [%s] ip [%s] mac [%s] withdrawl [%t] neighbor [%s] local [%t] nexthop [%s] as path [%s] communities %+v",
 		tStr, p.RT, p.RD, p.Mac.String(), p.IP.String(),
@@ -142,7 +153,24 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 }
 
 func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) {
-	fmt.Println("Not Implement")
+	for _, info := range vxlanInfos {
+		s.logger.WithFields(logrus.Fields{
+			"Topic": "DVR Vxlan Info",
+		}).Info(info.Detail())
+
+		// Parse cidr by dvr ip address
+		cidr, gw, err := utils.ParseNetworkInfo(info.ip, info.netLen, info.subnetLen)
+		if err != nil {
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "DVR Vxlan Info",
+			}).Errorf("Parse network info failed %s", err.Error())
+		}
+		fmt.Printf("%s %s", cidr.String(), gw.String())
+
+		// Setup or teardown
+
+		// Sync fdb, neigh, route
+	}
 }
 
 func (s *AgentServer) handleVM(vxlanInfos []*vxlanInfo) {
@@ -166,6 +194,14 @@ func (s *AgentServer) generateVxlanInfo(rt, rd int, p *PathInfo) []*vxlanInfo {
 			s.logger.WithFields(logrus.Fields{
 				"Topic": "VxlanInfo",
 			}).Errorf("Get netns id of interface [%s] failed %s", dvrIface, err.Error())
+			continue
+		}
+
+		netLen, subnetLen, err := utils.GetNetInfoFromComms(p.Communities)
+		if err != nil {
+			s.logger.WithFields(logrus.Fields{
+				"Topic": "VxlanInfo",
+			}).Error(err.Error())
 		}
 
 		info := new(vxlanInfo)
@@ -178,6 +214,8 @@ func (s *AgentServer) generateVxlanInfo(rt, rd int, p *PathInfo) []*vxlanInfo {
 		info.age = p.Age
 		info.withdrawal = p.Withdrawal
 		info.dvrIface = dvrIface
+		info.netLen = netLen
+		info.subnetLen = subnetLen
 		vxlanInfos = append(vxlanInfos, info)
 	}
 	return vxlanInfos
@@ -192,6 +230,13 @@ func (s *AgentServer) handleMacadv(p *PathInfo) {
 		s.logger.WithFields(logrus.Fields{
 			"Topic": "MACADV",
 		}).Errorf("Parse vni failed %s", err.Error())
+		return
+	}
+	// Wait s.vniMap not empty before consume MACADV
+	// TODO(shawnlu): check path age, only consume age latter BUM
+	if len(s.vniMap) == 0 {
+		// Put pathInfo back, nor it will block comsume BUM
+		s.pathCh <- p
 		return
 	}
 	if _, ok := s.vniMap[rt]; !ok {
@@ -244,7 +289,7 @@ func (s *AgentServer) handleEVPNMsg() {
 			if !p.IsLocal {
 				s.logger.WithFields(logrus.Fields{
 					"Topic": "Skip BUM",
-				}).Debugf("%s", p.Detail())
+				}).Debug(p.Detail())
 				continue
 			}
 			s.handleBUM(p)
@@ -252,7 +297,7 @@ func (s *AgentServer) handleEVPNMsg() {
 			if p.IsLocal {
 				s.logger.WithFields(logrus.Fields{
 					"Topic": "Skip MACADV",
-				}).Debugf("%s", p.Detail())
+				}).Debug(p.Detail())
 				continue
 			}
 			s.handleMacadv(p)
