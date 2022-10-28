@@ -162,14 +162,14 @@ func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) bool {
 		}).Info(info.Detail())
 
 		// Parse cidr by dvr ip address
-		cidr, gw, err := utils.ParseNetworkInfo(info.ip, info.netLen, info.subnetLen)
+		cidr, err := utils.ParseNetworkInfo(info.ip, info.netLen, info.subnetLen)
 		if err != nil {
 			s.logger.WithFields(logrus.Fields{
 				"Topic": "DVR Vxlan Info",
 			}).Errorf("Parse network info failed %s", err.Error())
 			return false
 		}
-		fmt.Printf("%s %s", cidr.String(), gw.String())
+		fmt.Print(cidr.String())
 
 		// Setup or teardown
 
