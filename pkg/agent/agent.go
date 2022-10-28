@@ -35,7 +35,6 @@ type vxlanInfo struct {
 	nexthop    net.IP
 	vtep       string // Local vxlan vtep
 	netnsId    int    // Local dvr netns id
-	age        int64
 	withdrawal bool
 	dvrIface   string
 	netLen     int
@@ -43,18 +42,17 @@ type vxlanInfo struct {
 }
 
 type AgentServer struct {
-	host   string
-	logger *logrus.Logger
-	pathCh chan *PathInfo
-	vniMap map[int][]int
+	host    string
+	logger  *logrus.Logger
+	pathCh  chan *PathInfo
+	vniMap  map[int][]int
+	msgBook map[string]int64 // Mac-ip as key, age as value
 }
 
 func (info *vxlanInfo) Detail() string {
-	t := time.Unix(info.age, 0)
-	tStr := t.Format(utils.CLS_FORMAT)
 	return fmt.Sprintf(
-		"age [%s] vni [%d] ip [%s] mac [%s] nexthop [%s] vtep [%s] netnsId [%d] withdrawal [%t] net len [%d] subnet len [%d]",
-		tStr, info.vni, info.ip.String(), info.mac.String(), info.nexthop.String(), info.vtep, info.netnsId, info.withdrawal, info.netLen, info.subnetLen,
+		"vni [%d] ip [%s] mac [%s] nexthop [%s] vtep [%s] netnsId [%d] withdrawal [%t] net len [%d] subnet len [%d]",
+		info.vni, info.ip.String(), info.mac.String(), info.nexthop.String(), info.vtep, info.netnsId, info.withdrawal, info.netLen, info.subnetLen,
 	)
 }
 
@@ -68,12 +66,17 @@ func (p *PathInfo) Detail() string {
 	)
 }
 
+func (p *PathInfo) Identification() string {
+	return fmt.Sprintf("%s-%s", p.Mac.String(), p.IP.String())
+}
+
 func NewServer(host string, logger *logrus.Logger) *AgentServer {
 	return &AgentServer{
-		host:   host,
-		logger: logger,
-		pathCh: make(chan *PathInfo, 16),
-		vniMap: make(map[int][]int),
+		host:    host,
+		logger:  logger,
+		pathCh:  make(chan *PathInfo, 16),
+		vniMap:  make(map[int][]int),
+		msgBook: make(map[string]int64),
 	}
 }
 
@@ -152,7 +155,7 @@ func (s *AgentServer) handleBUM(p *PathInfo) {
 	s.vniMap[rt] = append(s.vniMap[rt], rd)
 }
 
-func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) {
+func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) bool {
 	for _, info := range vxlanInfos {
 		s.logger.WithFields(logrus.Fields{
 			"Topic": "DVR Vxlan Info",
@@ -164,6 +167,7 @@ func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) {
 			s.logger.WithFields(logrus.Fields{
 				"Topic": "DVR Vxlan Info",
 			}).Errorf("Parse network info failed %s", err.Error())
+			return false
 		}
 		fmt.Printf("%s %s", cidr.String(), gw.String())
 
@@ -171,10 +175,12 @@ func (s *AgentServer) handleDVR(vxlanInfos []*vxlanInfo) {
 
 		// Sync fdb, neigh, route
 	}
+	return true
 }
 
-func (s *AgentServer) handleVM(vxlanInfos []*vxlanInfo) {
+func (s *AgentServer) handleVM(vxlanInfos []*vxlanInfo) bool {
 	fmt.Println("Not Implement")
+	return true
 }
 
 func (s *AgentServer) generateVxlanInfo(rt, rd int, p *PathInfo) []*vxlanInfo {
@@ -211,7 +217,6 @@ func (s *AgentServer) generateVxlanInfo(rt, rd int, p *PathInfo) []*vxlanInfo {
 		info.nexthop = p.Nexthop
 		info.vtep = vtep
 		info.netnsId = netnsId
-		info.age = p.Age
 		info.withdrawal = p.Withdrawal
 		info.dvrIface = dvrIface
 		info.netLen = netLen
@@ -233,7 +238,6 @@ func (s *AgentServer) handleMacadv(p *PathInfo) {
 		return
 	}
 	// Wait s.vniMap not empty before consume MACADV
-	// TODO(shawnlu): check path age, only consume age latter BUM
 	if len(s.vniMap) == 0 {
 		// Put pathInfo back, nor it will block comsume BUM
 		s.pathCh <- p
@@ -253,14 +257,30 @@ func (s *AgentServer) handleMacadv(p *PathInfo) {
 			return
 		}
 
+		// Check age before consume msg, only consume latest msg
+		bookID := p.Identification()
+		if bookInfo, ok := s.msgBook[bookID]; ok {
+			if bookInfo >= p.Age {
+				s.logger.WithFields(logrus.Fields{
+					"Topic":  "MACADV",
+					"Staled": true,
+				}).Info(p.Detail())
+				return
+			}
+		}
+
 		// Generate vxlanInfo, sync fdb,route and neigh to all vtep under the same vpc
 		vxlanInfos := s.generateVxlanInfo(rt, rd, p)
 
 		switch vniType {
 		case utils.MSG_TYPE_DVR:
-			s.handleDVR(vxlanInfos)
+			if s.handleDVR(vxlanInfos) {
+				s.msgBook[bookID] = p.Age
+			}
 		case utils.MSG_TYPE_VM:
-			s.handleVM(vxlanInfos)
+			if s.handleVM(vxlanInfos) {
+				s.msgBook[bookID] = p.Age
+			}
 		default:
 			s.logger.WithFields(logrus.Fields{
 				"Topic": "MACADV",
